@@ -1,0 +1,768 @@
+---
+title: "Projet-9.2 Analyse"
+author: "Moty Philippe"
+date: "06-2022"
+output : 
+  html_notebook : 
+    toc : true
+    toc_depth : 2
+    toc_float : true
+---
+```{r warning=FALSE, message=FALSE,echo = FALSE} 
+library('cluster')    # clustering
+library('dendextend') # couleur dendrogramme
+library('factoextra') # visualisation dendrogramme
+library('corrplot') # pour faire une 'heatmap' de points
+library('readxl') # lecture xls
+```
+
+# Import des données
+```{r}
+donnees.Pays <- read.csv("D:/IT/DATA/OC/DATA-PROJETS/PROJET-9/assets/data/data_pays_5.csv",sep=',',encoding='UTF-8')
+rownames(donnees.Pays) = donnees.Pays$Country # index
+```
+
+
+# Classification Ascendante Hiérarchique
+
+## Préparation des données
+
+Data : les données sont est centrées réduites et nom pays comme index
+
+```{r}
+data <- donnees.Pays[,-1]
+# Centrer et réduire les valeurs
+data <- scale(data,center=TRUE, scale = TRUE)
+
+```
+
+## Clustering Ascendant hiérarchique
+```{r}
+# Classification ascendante hiérarchie
+cah.res <- hclust(dist(data, method = 'euclidean' ),method='ward.D2')
+```
+
+## Dendrogramme
+```{r}
+# dendrogramme exporté en png
+png(file="../assets/resultats/cah_dendrogramme.png",width=1800,height=750)
+par(cex=0.8, mar=c(5, 8, 4, 1))
+plot(cah.res, xlab="", ylab="", main="", hang = -1)
+par(cex=2)
+title(xlab="Pays", ylab="Distance", main="Classification ascendante hiérarchique ")
+dev.off()
+```
+### Partition
+```{r}
+arbre <- cah.res
+plot(arbre, labels = FALSE, main = "Partition en 5 ou 6 classes", xlab = "", ylab = "", sub = "", axes = FALSE, hang = -1)
+rect.hclust(arbre, 5, border = "red3")
+rect.hclust(arbre, 6, border = "blue3")
+```
+
+#### Perte d'inertie
+```{r}
+inertie <- sort(arbre$height, decreasing = TRUE)
+plot(inertie[1:10], type = "s", xlab = "Nombre de classes", ylab = "Inertie")
+
+points(c(3, 5, 6), inertie[c(3, 5, 6)], col = c("green3", "red3", "blue3"), cex = 2, lwd = 3)
+```
+Pour obtenir une partition de la population (Pays), il suffit de découper le dendrogramme obtenu à une certaine hauteur. En premier lieu, une analyse de la forme du dendrogramme pourra nous donner une indication sur le nombre de classes à retenir. Dans notre exemple, deux branches bien distinctes apparaissent sur l’arbre.
+
+Pour nous aider, nous pouvons représenter les sauts d’inertie du dendrogramme selon le nombre de classes retenues.
+On voit 3 saut assez nets à 3,5,6 représenté en vert, rouge, bleu
+
+
+```{r}
+# png(file="../assets/resultats/cah_dendrogramme_2.png",width=1800,height=750)
+fviz_dend(arbre, k = 6, show_labels = TRUE, rect = TRUE)
+```
+
+```{r}
+rm(inertie,arbre)
+```
+
+### On détermine le nombre optimal de cluster
+
+```{r}
+# Détecter le nombre de cluster
+
+BT <- c()
+for (k in 1:10){
+  tmp <-kmeans(data,centers=k)
+  BT[k] <- tmp$betweenss/tmp$totss # La somme des carrés entre les grappes / La somme totale des carrés
+} #je fais évoluer le nombre de cluster de 1 à 10
+
+# affichage
+print(BT)
+  
+# choix sur graphique
+plot(1:10,BT,type='b',main='Inertie expliqué vs. nb de groupe')
+  
+```
+
+```{r}
+# on nettoie l'environnement
+rm(BT, k, tmp)
+```
+
+### Coefficient de Silhouette pour déterminer la valeur optimale de k
+```{r}
+silhouette_score <- function(k){
+  km <- kmeans(data, centers = k, nstart=25)
+  ss <- silhouette(km$cluster, dist(data))
+  mean(ss[, 3])
+}
+
+k <- 2:10
+avg_sil <- sapply(k, silhouette_score)
+plot(k, type='b', avg_sil, xlab='Number of clusters', ylab='Average Silhouette Scores', frame=FALSE)
+```
+```{r}
+# On nettoie l'environnement
+rm(avg_sil,k,silhouette_score)
+```
+
+
+On choisit le nombre de cluster a 6
+```{r}
+cah.groupes = factor(cutree(cah.res, 6))
+
+```
+
+### On calcul des centroïdes
+```{r}
+centroides = data.frame() # on créé un df vide
+
+# pour chaque groupes,
+nom_groupes = unique(cah.groupes)
+for (i in nom_groupes) {
+  # je recupere les valeurs du cluster
+  groupe = subset(data, cah.groupes == i)
+  # je calcule le centroide en faisant une moyenne par colonne
+  centroid = colMeans(groupe, na.rm = TRUE)
+  # je l'ajoute au df
+  centroides = rbind(centroides, centroid)
+}
+
+# on renomme chaque colonne avec le nom du dernier centroide calculé
+names(centroides) = names(centroid)
+rownames(centroides) = nom_groupes
+```
+
+
+## Visualisation heatmap de la classification hiérarchique
+
+```{r}
+centroides
+```
+```{r}
+library(pheatmap)
+```
+
+
+```{r}
+png(file="../assets/resultats/cah_pheatmaps.png",width=1800,height=750)
+pheatmap(t(centroides),
+         display_numbers = TRUE,# pour afficher les valeurs
+         fontsize = 30, # pour diminuer la police des valeurs 
+         cluster_cols = FALSE,# pour obtenir un réarrangement de colonnes
+         cluster_rows = FALSE, # pour obtenir un réarrangement de lignes
+         scale="column"
+         ) 
+```
+
+```{r}
+round(centroides,2)
+```
+
+
+
+```{r}
+# png(file="../assets/resultats/cah_heatmap.png",width=1800,height=750)
+heatmap(t(as.matrix(centroides)), Rowv = NA, Colv = NA, margins = c(6,6),main="clustering CAH") 
+
+legend(x="left",y='center',title = "Performance des clusters", legend=c("max","strong","medium","weak", "min"),cex=2,fill = heat.colors(6))
+```
+
+
+Ajouter une colonne cluster cah à data
+```{r}
+data_cah <- cbind(data, cah.groupes)
+donnees.Pays <- cbind(donnees.Pays,cah.groupes)
+# head(data)
+```
+
+```{r}
+rm(nom_groupes,i,groupe,centroid,cah.res)
+
+# export centroides
+write.table(centroides,"../assets/resultats/cah_centroides.csv",sep=",",row.names=FALSE,quote=FALSE)
+
+```
+
+## Travail sur les pays 
+
+```{r}
+temp <- subset(donnees.Pays, donnees.Pays$cah.groupes== 1)
+print(temp$Country)
+```
+
+
+```{r}
+temp <- subset(donnees.Pays, donnees.Pays$cah.groupes== 2)
+print(temp$Country)
+```
+
+
+```{r}
+temp <- subset(donnees.Pays, donnees.Pays$cah.groupes== 3)
+print(temp$Country)
+```
+
+
+```{r}
+temp <- subset(donnees.Pays, donnees.Pays$cah.groupes== 4)
+print(temp$Country)
+```
+
+
+```{r}
+temp <- subset(donnees.Pays, donnees.Pays$cah.groupes== 5)
+print(temp$Country)
+```
+
+
+```{r}
+temp <- subset(donnees.Pays, donnees.Pays$cah.groupes== 6)
+print(temp$Country)
+```
+
+### MAP - Clustering CAH
+
+
+```{r, echo=FALSE}
+library(maptools)
+data(wrld_simpl)
+
+my_map <- wrld_simpl
+```
+
+Préparation des données 
+```{r}
+# donnee.map <- donnees.Pays
+# donnee.map <- c("Country","cah.groupes")
+# donnee.map <- as.data.frame(donnee.map)
+
+```
+
+
+```{r}
+png(file="../assets/resultats/cah_map.png",width=1800,height=750)
+country_colors <- setNames(rep("white", length(my_map$NAME)), my_map$NAME)
+
+country_colors[c("Afghanistan","Algeria","Angola","Argentina","Azerbaijan","Bangladesh","Burkina Faso","Cameroon","Chad","Ethiopia","Gabon","Gambia","Guatemala","Guinea","Guinea-Bissau","Haiti","Iraq","Kenya","Lebanon","Liberia","Madagascar","Mali","Mauritania","Mozambique","Myanmar","Niger","Nigeria","Pakistan","Rwanda","Sierra Leone","Sri Lanka","Sudan","Suriname","Tajikistan","Togo")] <- c("yellow") # cluster 1
+
+
+country_colors[c( "Albania","Armenia","Austria","Belarus","Bosnia and Herzegovina","Canada","Croatia","Cyprus","Czech Republic","Denmark","Estonia","Finland" , "Georgia","Greece","Hungary","Ireland","Italy"  ,"Kazakhstan","Latvia","Lithuania", "Luxembourg","Malta","Morocco","Norway","Poland","Portugal","Russia","Slovenia", "Spain","Sweden","Switzerland","Tunisia","Ukraine","United Arab Emirates")] <- c("pink") # cluster 2
+
+
+country_colors[c("Antigua and Barbuda","Bahamas","Benin","Botswana","Brazil"  ,"Cambodia","Chile"   ,"Colombia","Costa Rica","Dominica","Dominican Republic","Ecuador","El Salvador","Fiji","Ghana","Grenada","Honduras","Indonesia","Israel", "Jamaica","Jordan","Kiribati","Kuwait","Lesotho", "Malaysia","Maldives","Mauritius","Mongolia","Nepal","Nicaragua","Oman","Panama", "Paraguay","Peru","Samoa","Thailand","Trinidad and Tobago", "Uruguay","Vanuatu","Zambia","Zimbabwe")] <- c("green") # cluster 3
+
+country_colors[c( "Belgium","France","Germany","Japan","Mexico","Netherlands","Saudi Arabia", "South Africa","United Kingdom")] <- c("red") # cluster4 
+
+country_colors[c( "India")] <- c("blue") # cluster 5
+
+country_colors[c( "United States")] <- c("orange") # cluster 6
+
+plot(my_map, col = country_colors)
+title("Resultat clustering par CAH")
+
+legend(x='bottomright', border = "black",title = 'les clusters',cex=2 ,legend = c( "cluster 1", "cluster 2", "cluster 3", "cluster 4", "cluster 5", "cluster 6"),fill = c('yellow','pink','green','red','blue','orange'))
+```
+
+Nettoyage environnement
+```{r}
+rm(wrld_simpl,temp,my_map,country_colors,centroides,data_cah,cah.groupes)
+```
+
+# K-MEANS
+
+## On détermine le nombre optimal de cluster 
+
+création de la fonction
+```{r}
+# WWS plot function
+wss <- function(data, nc=10, seed=1234) {
+  wss <- (nrow(data)-1)*sum(apply(data,2,var))
+  for (i in 2:nc) {
+    set.seed(seed)
+    wss[i] <- sum(kmeans(data,centers=i)$withinss)}
+  
+plot(1:nc,wss,type="b", xlab="Number of Clusters", ylab="Within groups sum of square")
+}
+```
+
+## On affiche le plot de la méthode du coude
+```{r}
+wss(data)
+```
+```{r}
+# On nettoie l'environnement
+rm(wss)
+```
+
+## On compare
+```{r}
+ratio_ss <- data.frame(cluster = seq(from = 1, to = 9, by = 1)) 
+for (k in 1:9) {
+km_model <- kmeans(data, k, nstart = 20)
+ratio_ss$ratio[k] <- km_model$tot.withinss / km_model$totss
+}
+```
+
+```{r}
+ggplot(ratio_ss, aes(cluster, ratio)) + 
+geom_line() +
+geom_point()
+```
+```{r}
+
+```
+
+On en déduit que c'est entre 4 et 6 mais 5 n'apporte rien car il englobe Inde et USA dans le même cluster
+
+## Calcule du 6-Means
+```{r}
+# Compute k-means with k = 6
+km.res <- kmeans(data, 6, nstart = 25)
+```
+
+Afficher le resultat
+```{r}
+print(km.res)
+```
+
+
+Il est possible de calculer la moyenne de chaque variable par clusters en utilisant les données d'origine :
+
+```{r warning=FALSE}
+agg_donneesPays_cluster <- aggregate(donnees.Pays, by=list(cluster=km.res$cluster), mean)
+agg_donneesPays_cluster <- agg_donneesPays_cluster[,c(-2,-12)]
+
+```
+```{r}
+# export centroides des clusters
+write.table(agg_donneesPays_cluster,"../assets/resultats/km6_centroides.csv",sep=",",row.names=FALSE,quote=FALSE)
+```
+
+Ajouter les classifications de points aux données d'origine :
+
+```{r}
+donnees.Pays <- cbind(donnees.Pays, cluster = km.res$cluster)
+head(donnees.Pays)
+```
+
+```{r}
+centroides = km.res$centers
+centroides <- centroides[,-10]
+# png(file="../assets/resultats/km6_heatmap.png",width=1800,height=750)
+heatmap(t(as.matrix(centroides)), Rowv = NA, Colv = NA, margins = c(6,6),main="Clustering 6-means")
+legend(x="left",y='center',title = "Performance des clusters", legend=c("max","strong","medium","weak", "min"),cex=2,fill = heat.colors(6))
+```
+
+```{r}
+png(file="../assets/resultats/km6_pheatmaps.png",width=1800,height=750)
+pheatmap(t(centroides),
+         display_numbers = TRUE,# pour afficher les valeurs
+         fontsize = 30, # pour diminuer la police des valeurs 
+         cluster_cols = FALSE,# pour obtenir un réarrangement de colonnes
+         cluster_rows = FALSE, # pour obtenir un réarrangement de lignes
+         scale="column"
+         ) 
+```
+
+## Etude des pays
+
+```{r}
+temp <- subset(donnees.Pays, donnees.Pays$cluster== 1)
+print(temp$Country)
+```
+```{r}
+temp <- subset(donnees.Pays, donnees.Pays$cluster== 2)
+print(temp$Country)
+```
+```{r}
+temp <- subset(donnees.Pays, donnees.Pays$cluster== 3)
+print(temp$Country)
+```
+```{r}
+temp <- subset(donnees.Pays, donnees.Pays$cluster== 4)
+print(temp$Country)
+```
+```{r}
+temp <- subset(donnees.Pays, donnees.Pays$cluster== 5)
+print(temp$Country)
+```
+```{r}
+temp <- subset(donnees.Pays, donnees.Pays$cluster == 6)
+print(temp$Country)
+```
+### Carte repartition des groupes issus du 6-means
+```{r}
+#library(maptools)
+data(wrld_simpl)
+my_map <- wrld_simpl
+
+```
+
+```{r}
+png(file="../assets/resultats/km6_map.png",width=1800,height=750)
+country_colors <- setNames(rep("white", length(my_map$NAME)), my_map$NAME)
+
+country_colors[c("Angola","Argentina","Azerbaijan","Ethiopia","Guinea","Kenya","Mozambique","Nigeria","Rwanda","Sierra Leone","Sudan","Suriname","Ukraine")] <- c("yellow") # cluster 1
+
+country_colors[c("Antigua and Barbuda","Bahamas","Brazil","Chile","Colombia","Costa Rica","Dominica","Dominican Republic","Fiji","Grenada","Israel","Jamaica","Kiribati","Kuwait","Malaysia","Mauritius","Mexico","Panama","Peru","Samoa","Saudi Arabia","South Africa","Trinidad and Tobago","Vanuatu"   )] <- c("pink") # cluster 2
+
+country_colors[c(
+  "Afghanistan",   "Algeria",       "Bangladesh",    "Benin",         "Botswana",      "Burkina Faso",  "Cambodia",     
+  "Cameroon",      "Chad",          "Ecuador",       "El Salvador",   "Gabon",         "Gambia",        "Ghana",        
+  "Guatemala",     "Guinea-Bissau", "Haiti",         "Honduras",      "Indonesia",     "Iraq",          "Jordan",      
+  "Lebanon",       "Lesotho",       "Liberia" ,      "Madagascar",    "Maldives",      "Mali",          "Mauritania",   
+  "Mongolia",      "Myanmar",       "Namibia",       "Nepal",         "Nicaragua",     "Niger",         "Pakistan",     
+  "Paraguay",      "Sri Lanka" ,    "Tajikistan",    "Thailand",      "Togo",          "Tunisia",       "Uganda",       
+  "Uruguay",       "Zambia",        "Zimbabwe"
+  )] <- c("green") # cluster 3
+
+country_colors[c("India")] <- c("red") # cluster4 
+
+country_colors[c(
+  "Albania",                "Armenia",                "Austria",                "Belarus",               
+  "Belgium",                "Bosnia and Herzegovina", "Bulgaria",               "Canada",                
+  "Croatia",                "Cyprus",                 "Czech Republic",                "Denmark",               
+  "Estonia",                "Finland",                "France",                 "Georgia",               
+  "Germany",                "Greece",                 "Hungary" ,               "Ireland",               
+  "Italy" ,                 "Kazakhstan",             "Latvia",                 "Lithuania",             
+  "Luxembourg" ,            "Malta",                  "Morocco",                "Netherlands",           
+  "Norway",                 "Oman",                   "Poland",                 "Portugal",              
+  "Russia" ,               "Slovenia",               "Spain",                  "Sweden",                
+  "Switzerland",            "United Arab Emirates", "United Kingdom", 'Japan' 
+  )] <- c("blue") # cluster 5
+               
+country_colors[c("United States")] <- c('orange') # cluster 6
+
+plot(my_map, col = country_colors)
+title("Resultat clustering par K-MEANS")
+
+legend(x='bottomright', border = "black",title = 'les clusters',cex=2 ,legend = c( "cluster 1", "cluster 2", "cluster 3", "cluster 4", "cluster 5", "cluster 6"),fill = c('yellow','pink','green','red','blue','orange'))
+
+```
+
+Nettoyage environnement
+```{r}
+rm(wrld_simpl,temp,my_map,km.res,country_colors,centroides,agg_donneesPays_cluster)
+```
+
+## K-Means a 5 pour conforter notre décisions à 6
+ 
+Calcule du K-Means
+```{r}
+# Compute k-means with k = 5
+km.res <- kmeans(data, 5, nstart = 25)
+```
+
+Afficher le resultat
+```{r}
+print(km.res)
+```
+
+
+```{r}
+# df <- as.data.frame(km.res$cluster)
+table(km.res$cluster)
+```
+
+Il est possible de calculer la moyenne de chaque variable par clusters en utilisant les données d'origine :
+
+```{r warning=FALSE}
+agg_donneesPays_cluster <- aggregate(donnees.Pays, by=list(cluster=km.res$cluster), mean)
+# agg_donneesPays_cluster <- agg_donneesPays_cluster[,c(-2,-12)]
+```
+
+```{r}
+# export centroides des clusters
+# write.table(agg_donneesPays_cluster,"../assets/resultats/km5_centroides.csv",sep=",",row.names=FALSE,quote=FALSE)
+```
+
+Ajouter les classifications de points aux données d'origine :
+
+```{r}
+donnees.Pays <- cbind(donnees.Pays, cluster.km.5 = km.res$cluster)
+head(donnees.Pays)
+```
+
+
+```{r}
+centroides = km.res$centers
+centroides <- centroides[,-10]
+# png(file="../assets/resultats/km5_heatmap.png",width=1800,height=750)
+heatmap(t(as.matrix(centroides)), Rowv = NA, Colv = NA, margins = c(6,6),main="Clustering K-means"
+        )
+legend(x="left",y='center',title = "Performance des clusters", legend=c("max","strong","medium","weak", "min"),cex=2,fill = heat.colors(6))
+
+```
+
+```{r}
+# png(file="../assets/resultats/km5_pheatmaps.png",width=1800,height=750)
+pheatmap(t(centroides),
+         display_numbers = TRUE,# pour afficher les valeurs
+         fontsize = 30, # pour diminuer la police des valeurs 
+         cluster_cols = FALSE,# pour obtenir un réarrangement de colonnes
+         cluster_rows = FALSE, # pour obtenir un réarrangement de lignes
+         scale="column"
+         )
+```
+ETUDE DES PAYS DES CLUSTERS CARTE
+
+```{r}
+temp <- subset(donnees.Pays, donnees.Pays$cluster.km.5== 1)
+print(temp$Country)
+```
+```{r}
+temp <- subset(donnees.Pays, donnees.Pays$cluster.km.5== 2)
+print(temp$Country)
+```
+```{r}
+temp <- subset(donnees.Pays, donnees.Pays$cluster.km.5== 3)
+print(temp$Country)
+```
+```{r}
+temp <- subset(donnees.Pays, donnees.Pays$cluster.km.5== 4)
+print(temp$Country)
+```
+```{r}
+temp <- subset(donnees.Pays, donnees.Pays$cluster.km.5== 5)
+print(temp$Country)
+```
+
+
+### Carte repartition des groupes issus du kmeans
+```{r}
+#library(maptools)
+data(wrld_simpl)
+my_map <- wrld_simpl
+
+```
+
+```{r}
+# png(file="../assets/resultats/km5_map.png",width=1800,height=750)
+country_colors <- setNames(rep("white", length(my_map$NAME)), my_map$NAME)
+
+country_colors[c("United States")] <- c('orange') # cluster 1
+
+country_colors[c("Afghanistan",   "Algeria",       "Angola" ,       "Azerbaijan",    "Bangladesh",    "Benin",         "Burkina, Faso","Cambodia",      "Cameroon",      "Chad" ,         "Ethiopia" ,     "Gambia",        "Ghana",         "Guatemala" ,   "Guinea",        "Guinea-Bissau", "Haiti" ,        "Iraq" ,         "Kenya",         "Lebanon",       "Lesotho",      "Liberia",       "Madagascar",    "Maldives",      "Mali" ,         "Mauritania",    "Mozambique",    "Myanmar",      "Nepal",         "Niger" ,        "Nigeria",       "Pakistan",      "Paraguay",      "Rwanda",        "Sierra Leone" ,"Sri Lanka",     "Sudan" ,        "Suriname",      "Tajikistan",    "Togo",          "Tunisia",      "Uganda",       "Ukraine",       "Zambia",        "Zimbabwe"  )] <- c("blue") # cluster 2
+
+country_colors[c(
+"Albania",                "Armenia",                "Austria",                "Belarus",               
+"Belgium",                "Bosnia and Herzegovina", "Bulgaria",               "Canada",                
+"Croatia" ,               "Cyprus",                 "Czech Republic",         "Denmark" ,              
+"Estonia",                "Finland",                "France",                 "Georgia",               
+"Germany",                "Greece",                 "Hungary",                "Ireland" ,              
+"Italy",                  "Japan",                  "Kazakhstan" ,            "Latvia",                
+"Lithuania" ,             "Luxembourg",             "Malta",                  "Mexico",                
+"Mongolia",               "Morocco",                "Netherlands",            "Norway",                
+"Oman",                   "Poland",                 "Portugal",               "Russia" ,   
+"Saudi Arabia",           "Slovenia",               "Spain",                  "Sweden",                
+"Switzerland","United Arab Emirates", "United Kingdom" )] <- c("yellow") # cluster 3
+
+country_colors[c("India")] <- c("pink") # cluster 4
+
+country_colors[c(
+"Antigua and Barbuda", "Argentina" ,          "Bahamas",             "Botswana",            "Brazil",             
+"Chile" ,              "Colombia" ,           "Costa Rica",          "Dominica",            "Dominican Republic", 
+"Ecuador"   ,          "El Salvador" ,        "Fiji",                "Gabon",               "Grenada" ,           
+"Honduras"  ,          "Indonesia",           "Israel",              "Jamaica",             "Jordan",             
+"Kiribati"  ,          "Kuwait",              "Malaysia" ,           "Mauritius",           "Namibia",            
+"Nicaragua",           "Panama",              "Peru" ,               "Samoa",               "South Africa",       
+"Thailand"  ,          "Trinidad and Tobago", "Uruguay",             "Vanuatu"
+)] <- c("green") # cluster 5
+
+
+
+plot(my_map, col = country_colors)
+title("Resultat clustering par 5-MEANS")
+
+legend(x='bottomright', border = "black",title = 'les clusters',cex=2 ,legend = c( "cluster 1", "cluster 2", "cluster 3", "cluster 4", 'cluster 5'),fill = c('yellow','pink','green','red', "blue"))
+
+```
+
+Nettoyage environnement
+```{r}
+rm(wrld_simpl,temp,my_map,km.res,country_colors,centroides,agg_donneesPays_cluster,ratio_ss,km_model,k)
+```
+
+CHOIX CLUSTER ET ACP
+creer un df avec les pays du cluster kmeans 6
+Kmeans est plus performant dans la définition de zones plus cohérantes : au niveau business (alliance, proximités, membre d'association éconnomique, distance...)
+k= 6 permet de filtrer un maximum de pays en restant cohérent
+
+
+
+# ACP
+
+Import des bibliothèques
+```{r warning=FALSE}
+library("FactoMineR")
+library("factoextra")
+```
+
+## Préparation des données
+```{r}
+str(donnees.Pays)
+# On crée un df avec uniquement les données du 6-means = 5 en raison de sa cohérence et de la performance de ses indicateurs
+donnees.pca <- donnees.Pays 
+donnees.pca <- subset(donnees.pca, donnees.pca$cluster == 5)
+
+# on crée un df sans les colonnes de clustering
+donnees.pca <- donnees.pca[,2:10]
+
+```
+
+## Visualisation de l'ACP
+Standardisation des données
+```{r}
+res.pca <- PCA(donnees.pca, scale.unit = TRUE, ncp = 3, graph = TRUE)
+```
+
+## éboulis des valeurs propres
+
+```{r}
+library(factoextra)
+fviz_eig(res.pca, addlabels = TRUE)
+```
+
+## qualité de la représentation
+
+```{r}
+
+corrplot(res.pca$var$cos2, is.corr = FALSE)
+```
+
+## cercle des corrélations
+
+```{r}
+fviz_pca_var(res.pca,
+             title='Cercle de corrélation des variables',
+             col.var = "cos2",
+             gradient.cols =  c("#00AFBB", "#E7B800", "#FC4E07"),
+             #alpha.var = "cos2",
+             geom=c('arrow', 'text'),
+             labelsize = 3,
+             repel = TRUE
+)
+
+```
+
+## nuages des individus
+
+```{r}
+# on créé la figure
+figure = fviz_pca_ind(res.pca, 
+             geom=c("text", 'point'),
+             labelsize=3,
+             alpha.ind="cos2",
+             #pointsize='5',
+             repel = TRUE,
+             mean.point = FALSE
+)
+
+# On l'enregistre
+# png(file="../assets/resultats/acp_onSelection_individual.png",width=1800,height=750)
+
+print(figure)
+dev.off() # Close the pdf device
+# on l'affiche
+figure
+```
+
+### ACP avec Factominer
+```{r}
+library('FactoMineR') # ACP
+library('Factoshiny') # ACP
+```
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+# res.PCA <- Factoshiny(donnees.pca)
+```
+
+```{r}
+res.PCA<-PCA(donnees.pca,graph=FALSE)
+plot.PCA(res.PCA,choix='var',title="Graphe des variables de l'ACP")
+plot.PCA(res.PCA,title="Graphe des individus de l'ACP")
+```
+
+```{r}
+# PCAshiny(donnees.pca)
+```
+Retour aux données...
+
+```{r}
+retourDonnee = donnees.Pays
+retourDonnee = subset(retourDonnee, retourDonnee$cluster == 5)
+retourDonnee <- retourDonnee[,c(-11,-12,-13)]
+
+Pays_selectionnes <- retourDonnee[c('France',
+               'Netherlands',
+               'Germany',
+               'Spain',
+               'Canada',
+               'United Kingdom',
+               'Italy',
+               'Japan',
+               'Poland'),]
+
+```
+
+```{r}
+# export
+# write.table(Pays_selectionnes,"../assets/resultats/Selection_Finale.csv",sep=",",row.names=FALSE,quote=FALSE)
+```
+### Carte repartition des groupes issus du kmeans
+```{r}
+#library(maptools)
+data(wrld_simpl)
+my_map <- wrld_simpl
+
+```
+
+```{r}
+# png(file="../assets/resultats/MAP_resultatFinal.png",width=1800,height=750)
+country_colors <- setNames(rep("white", length(my_map$NAME)), my_map$NAME)
+country_colors[c('France')] <- c('grey')
+country_colors[c(
+               'Netherlands',
+               'Spain',
+               'Germany',
+               'Canada',
+               'United Kingdom',
+               'Italy',
+               'Japan',
+               'Poland'
+               )] <- c('green') # cluster 1
+
+plot(my_map, col = country_colors)
+title("Les pays à fort potentiel")
+
+legend(x='bottomright', border = "black",title = 'les clusters',cex=2 ,legend = c( "Pays d'origine","Pays propices à l'export","Selection"),fill = c('grey','green','red'))
+
+```
+
+Nettoyage environnement
+```{r}
+rm(wrld_simpl,my_map,country_colors)
+```
+
+```{r}
+
+```
+

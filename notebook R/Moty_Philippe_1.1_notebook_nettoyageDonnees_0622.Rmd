@@ -1,0 +1,844 @@
+---
+title: "Projet-9 nettoyage des donnees"
+author: "Moty Philippe"
+date: "26-2022"
+output : 
+  html_notebook : 
+    toc : true
+    toc_depth : 2
+    toc_float : true
+---
+
+```{r warning=FALSE}
+library(readxl) # lecture xls
+library(dplyr)  # deplacer les colonnes
+library(tidyr) # pivot table
+```
+
+```{r echo = FALSE}
+options(scipen = 100, digits = 4) # convertir la notation scientifique
+```
+
+# Préparation des données
+
+## pays
+
+### import des données
+import de la liste des pays depuis le site sql-sh
+```{r}
+pays <- read.csv("D:/IT/DATA/OC/DATA-PROJETS/PROJET-9/assets/data/sql-pays.csv",sep=";",header=TRUE, encoding='UTF-8')
+```
+
+### Manipulation des données
+```{r}
+# rename and select columns
+colnames(pays) <- c('index','code','iso_2','iso_3','Pays','Country')
+pays = pays[c('iso_2','iso_3','Pays','Country')]
+```
+
+```{r}
+sum(is.na(pays))
+```
+
+Localiser valeur manquante
+```{r}
+indLigneNA <- which(is.na(pays),arr.ind = TRUE)[1]
+indLigneNA
+```
+Il s'agit du code iso_2 de la Mamibie NA identifié comme une valeur null. On remplace la valeure null (NA) par la valeur "NA" pour Namibie
+```{r}
+pays[147,1] <- 'NA'
+pays[147,1]
+```
+Les colonnes de ce dataframe serviront de clé de jointure.
+
+
+### création data_pays
+Creation de data_pays : fusion de toutes les informations utilisées pour l'analyse
+```{r}
+data_pays = pays
+summary(data_pays)
+```
+
+
+#### Nettoyage environnement de travail
+```{r}
+rm(pays,indLigneNA)
+```
+
+## Disponibilité alimentaire
+
+### import des données
+```{r}
+dispo_alimentaire <- read.csv("D:/IT/DATA/OC/DATA-PROJETS/PROJET-9/assets/data/DisponibiliteAlimentaire_2017.csv",sep=";",header=TRUE, encoding='UTF-8')
+```
+
+### Manipulation des données
+```{r}
+# renommer et supprimer des colonnes avant traitement
+colnames(dispo_alimentaire) <- c('c_domain','domain','c_FAO','pays','c_element','element','c_prod','prod','c_year','year','unite','value','symb','desc_symb')
+dispo_alimentaire = dispo_alimentaire[c('pays','c_FAO','element','prod','value','unite')]
+```
+
+Filtrer les produits concernant la viande de volaille
+```{r}
+dispo_alimentaire = subset(dispo_alimentaire, prod =="Viande de Volailles")
+```
+
+Sélection des indicateurs 
+```{r}
+dispo_alimentaire = subset(dispo_alimentaire, element %in% c('Production','Importations - Quantité','Exportations - Quantité','Variation de stock','Disponibilité intérieure','Nourriture'))
+```
+
+Faire pivoter les lignes contenues dans element en colonne 
+```{r}
+dispo_alimentaire = dispo_alimentaire %>% pivot_wider(names_from = element,values_from = value)
+```
+
+Renommer les nouvelles colonnes obtenues
+```{r}
+colnames(dispo_alimentaire) <- c('Pays','c_FAO','Prod','Unite','Production_MT','Importation_MT','variation des stock','Exportation_MT','Disponibilité_interieure_MT', 'Nourriture_MT')
+```
+
+Selection des colonnes 
+```{r}
+dispo_alimentaire = dispo_alimentaire[c('Pays','c_FAO','Production_MT','Importation_MT','Disponibilité_interieure_MT', 'Nourriture_MT' )]
+```
+
+```{r}
+sum(is.na(dispo_alimentaire))
+```
+```{r}
+indLigneNA <- which(is.na(dispo_alimentaire),arr.ind = TRUE)[,1]
+indLigneNA
+```
+Le premier [44], il s'agit de Djibouti, si l'on applique la formule sa production devrait être égale à zero. On remplace le NA par 0
+Le second [99] Maldives ne produisent pas de volaille. On remplace par 0
+```{r}
+dispo_alimentaire[44,3] <- 0
+dispo_alimentaire[99,3] <- 0
+```
+
+Création du data frame test pour voir les erreur/différences dans la saisie des données
+```{r}
+temp = merge(x=data_pays,y=dispo_alimentaire,by ='Pays',all.x = TRUE, all.y=TRUE)
+```
+
+### Ajout de dispo_alimentaire à data_pays : 165 pays
+```{r}
+data_pays = merge(data_pays,dispo_alimentaire,on="Pays")
+# summary(data_pays)
+```
+
+#### Nettoyage de l'environnement
+```{r}
+rm(dispo_alimentaire,indLigneNA,temp)
+```
+
+
+## Distance_df
+
+### Import des données
+```{r}
+distance <- read.csv("D:/IT/DATA/OC/DATA-PROJETS/PROJET-9/assets/data/dist_cepii.csv",sep=";",header=TRUE, encoding='UTF-8')
+```
+
+### Manipulation des données
+On séléctionne la France comme pays d'origine et on affecte les distances aux autres pays
+```{r}
+distance = subset(distance, iso_o == 'FRA')
+distance = distance[c('iso_d','dist')]
+```
+
+on renomme les colonnes
+```{r}
+colnames(distance) <- c('iso_3','distance_France')
+```
+
+```{r}
+sum(is.na(distance))
+# summary(distance)
+```
+
+Création du data frame test pour voir les erreur/différences dans la saisie des données
+```{r}
+temp = merge(x=data_pays,y=distance ,by ='iso_3',all.x = TRUE, all.y=TRUE)
+
+```
+
+### Ajout de distance à data_pays : 161 pays
+```{r}
+data_pays = merge(data_pays,distance, on = 'iso_3')
+```
+
+#### Nettoyage de l'environnement
+```{r}
+rm(distance,temp)
+summary(data_pays)
+```
+
+## PIB
+### Import des données
+```{r}
+PIB <- read.csv("D:/IT/DATA/OC/DATA-PROJETS/PROJET-9/assets/data/Economie_PIB_croissance.csv",sep=";",header=TRUE, encoding='UTF-8')
+```
+### Manipulation des données
+On renomme les colonnes
+```{r}
+colnames(PIB) <- c('c_domain','domain','c_country','country','c_element','element','c_prod','prod','c_year','year','unite','value','symb','desc_symb','note')
+```
+On séléctionne les colonnes
+```{r}
+PIB = PIB[c('country','year','element','prod','value','unite')]
+```
+On fait pivoter les lignes en colonnes
+```{r}
+PIB = subset(PIB, element %in% c('Valeur US $'))
+colnames(PIB) <- c('Pays','year','element','prod','PIB_US_$_M','unite')
+```
+On sélectionne
+```{r}
+PIB = PIB[c('Pays','PIB_US_$_M')]
+```
+
+```{r echo = FALSE}
+sum(is.na(PIB))
+summary(PIB)
+```
+Création du data frame test pour voir les erreur/différences dans la saisie des données
+```{r}
+temp = merge(x=data_pays,y=PIB ,by ='Pays',all.x = TRUE, all.y=TRUE)
+
+```
+### Ajout de PIB à data_pays 
+```{r}
+data_pays = merge(data_pays,PIB, on = 'Pays')
+
+```
+
+#### Nettoyage de l'environnement
+```{r}
+rm(PIB, temp)
+```
+
+## political_stability
+
+### Import des données
+```{r}
+political_stability <- read.csv("D:/IT/DATA/OC/DATA-PROJETS/PROJET-9/assets/data/politicalStability_2017.csv",sep=";",header=TRUE, encoding='UTF-8')
+```
+
+### Manipulation des données
+Renommer les colonnes
+```{r}
+colnames(political_stability) <- c('c_domaine','domain','c_FAO','Country','c_element','element','c_item','item','c_year','year','unite','Political_stability','flag','flag_desc','note')
+```
+
+Selection des colonnes
+```{r}
+political_stability=political_stability[c('Country','c_FAO','year','item','Political_stability','unite')]
+```
+
+
+```{r}
+political_stability = political_stability[c('Country','c_FAO','Political_stability')]
+```
+
+```{r}
+sum(is.na(political_stability))
+# summary(political_stability)
+```
+
+Création du data frame test pour voir les erreurs/différences dans la saisie des données
+```{r}
+temp = merge(x=data_pays,y=political_stability ,by ='Country',all.x = TRUE, all.y=TRUE)
+```
+
+### Ajout de Political_stability à data_pays 
+```{r}
+data_pays = merge(data_pays,political_stability, on = 'Country')
+summary(data_pays)
+```
+
+#### Nettoyage de l'environnement
+```{r}
+rm(political_stability, temp)
+```
+
+## population
+
+### Import des données
+```{r}
+population <- read.csv("D:/IT/DATA/OC/DATA-PROJETS/PROJET-9/assets/data/Population_2000_2018.csv",sep=";",header=TRUE, encoding='UTF-8')
+```
+
+### Manipulation des données
+Renommer les colonnes
+```{r}
+colnames(population) <- c('c_domain','domain','c_country','Pays','c_element','element','c_prod','prod','c_year','year','unite','value','symb','desc_symb','note')
+```
+
+On fait une première sélection
+```{r}
+population = population[c('Pays','year','value')]
+```
+
+On change l'unité 
+```{r}
+population$value = population$value *1000
+```
+
+On pivote les années en colonnes
+```{r}
+population = population %>% pivot_wider(names_from = year,values_from = value) 
+```
+
+On selectionne 2010 et 2017 pour calculer l'évolution plus tard
+```{r}
+population = population[c('Pays','2012','2017')]
+```
+
+On renomme les colonnes pour quelles soit mieux identifiées dans le data_pays
+```{r}
+colnames(population) <- c('Pays','pop_2012','pop_2017')
+```
+
+```{r}
+sum(is.na(population))
+# summary(population)
+```
+On identifie les na
+```{r}
+indLigneNA <- which(is.na(population),arr.ind = TRUE)[,1]
+indLigneNA
+```
+
+On visualise et estime la pertinence des pays affecté par ces na
+```{r}
+for (i in indLigneNA) {
+  print(population[i,])
+}
+
+```
+On supprime les pays :  'Soudan (ex)',Soudan existe sous un autre nom et 'Serbie-et-Monténégro' existe en dissocié
+
+```{r, echo=FALSE}
+# suppression
+population = population[population$Pays != 'Serbie-et-Monténégro' & population$Pays != 'Soudan (ex)',]
+```
+
+### temp  pour visualiser les incohérences
+```{r}
+temp = merge(x=data_pays, y=population,by='Pays', all.x = TRUE,all.y=TRUE)
+
+```
+
+
+### Ajout de population à data_pays  
+```{r}
+data_pays = merge(data_pays,population, on = 'Pays')
+
+```
+
+#### Nettoyage de l'environnement
+```{r}
+rm(i,indLigneNA,population,temp)
+# summary(data_pays)
+```
+
+
+## business_score_df
+
+### Import des données
+```{r warning=FALSE}
+business_score = read_xlsx('D:/IT/DATA/OC/DATA-PROJETS/PROJET-9/assets/data/Historical-Data--DB04-DB20-.xlsx')
+```
+
+### Manipulation des données
+Séléctionner les colonnes
+```{r}
+business_score = business_score[c('Country code','Economy','DB year','Ease of doing business score (DB17-21 methodology)','Score-Starting a business')]
+```
+
+Renommer les colonnes
+```{r}
+colnames(business_score) <- c('iso_3','Country','year','Ease_of_doing_business_score','Score_Starting _a_business')
+```
+
+Filtrer sur 2017
+```{r}
+business_score = subset(business_score, year =='2017')
+```
+
+
+```{r}
+business_score = business_score[c('iso_3','Country','Ease_of_doing_business_score','Score_Starting _a_business')]
+
+```
+
+```{r}
+sum(is.na(business_score))
+```
+
+### temp  pour visualiser les incohérences
+```{r}
+temp = merge(x=data_pays, y=business_score,by='Country', all.x = TRUE,all.y=TRUE)
+
+```
+
+### Ajout de business_score a data_pays
+
+```{r}
+data_pays = merge(data_pays,business_score,on = 'Country')
+# summary(data_pays)
+```
+
+#### Nettoyage de l'environnement
+```{r}
+rm(business_score,temp)
+```
+
+## Dispo_alimentaire volaille
+
+### Import des données
+```{r}
+dispo_alim_total_volaille <- read.csv("D:/IT/DATA/OC/DATA-PROJETS/PROJET-9/assets/data/dispo_alimentaire volaille_total.csv",sep=";",header=TRUE, encoding='UTF-8')
+```
+
+### Manipulation des données
+On renomme les colonnes
+```{r}
+colnames(dispo_alim_total_volaille) <- c('c_domain','domain','c_country','Pays','c_element','element','c_prod','prod','c_year','year','unite','value','symb','desc_symb')
+```
+ 
+```{r}
+# On fait une première séléction de colonnes :
+dispo_alim_total_volaille = dispo_alim_total_volaille[c('Pays','element','prod','value','unite')]
+```
+
+On crée une colonne elem_prod qui concatene element et prod
+```{r}
+dispo_alim_total_volaille['elem_prod'] = paste(dispo_alim_total_volaille$element, dispo_alim_total_volaille$prod)
+dispo_alim_total_volaille = dispo_alim_total_volaille[c('Pays','elem_prod','value')]
+```
+
+On fait pivoter les données pour les avoir en colonne pour chaque pays
+```{r}
+dispo_alim_total_volaille <- dispo_alim_total_volaille %>% pivot_wider(names_from = elem_prod,values_from = value)
+```
+
+On renomme les colonnes
+```{r}
+names(dispo_alim_total_volaille) = c("Pays","Dispo_alim(Kcal/personne/jour)_Total_General", "Dispo_proteines_quantite(g/personne/jour)_Total_General","Dispo_alim_quantite(kg/personne/an)_Viande_Volailles", "Disp_alim(Kcal/personne/jour)_Viande_Volailles`
+","Dispo_proteines_quantite(g/personne/jour)_Viande_Volailles")
+```
+On recherche les na
+```{r}
+sum(is.na(dispo_alim_total_volaille))
+#summary(dispo_alim_total_volaille)
+```
+
+### temp  pour visualiser les incohérences
+```{r}
+temp = merge(x=data_pays, y= dispo_alim_total_volaille,by='Pays', all.x = TRUE,all.y=TRUE)
+
+```
+
+
+### On ajoute les données à data_pays 
+
+```{r}
+
+data_pays= merge(data_pays,dispo_alim_total_volaille,on = 'Pays')
+
+```
+
+#### Nettoyage de l'environnement
+```{r}
+rm(dispo_alim_total_volaille,temp)
+```
+
+
+# Export
+```{r}
+# export 
+write.table(data_pays,"../assets/data/data_pays_2.csv",sep=",",row.names=FALSE,quote=FALSE)
+
+```
+
+
+dfgdgfdgdgdgfdg
+
+gddghdffgdgfdg
+
+### Import des données
+```{r}
+import_poulet <- read.csv("D:/IT/DATA/OC/DATA-PROJETS/PROJET-9/assets/data/import_poulet.csv",sep=";",header=TRUE, encoding='UTF-8') 
+
+```
+
+### Manipulation des données
+
+Renommer
+```{r}
+names(import_poulet) <- c('c_domain','domain','c_FAO','Country','c_element','element','c_prod','prod','c_year','year','unite','value','symb','desc_symb')
+```
+```{r}
+# On fait une première séléction de colonnes :
+import_poulet = import_poulet [c('Country','c_FAO','element','unite','value')]
+```
+
+On crée une colonne elem_prod qui concatene element et prod
+```{r}
+import_poulet['elem_unite'] = paste(import_poulet$element, import_poulet$unite)
+import_poulet = import_poulet[c('Country','c_FAO','elem_unite','value')]
+```
+
+On fait pivoter les données pour les avoir en colonne pour chaque pays
+```{r}
+import_poulet <- import_poulet %>% pivot_wider(names_from = elem_unite,values_from = value)
+```
+
+On renomme les colonnes
+```{r}
+names(import_poulet) = c('Country','c_FAO','Importation_nb_tetes','Importation_tonnes','Importation_Poulet_$USD')
+```
+
+Changement d'unité 
+```{r}
+import_poulet['Importation_Poulet_$USD'] = import_poulet['Importation_Poulet_$USD'] * 1000
+```
+
+On recherche les na
+```{r}
+sum(is.na(import_poulet))
+#summary(dispo_alim_total_volaille)
+```
+
+### temp  pour visualiser les incohérences
+ 
+```{r}
+temp = merge(x=data_pays, y= import_poulet,by='Country', all.x = TRUE,all.y=TRUE)
+
+```
+
+### Ajout de  à data_pays 
+```{r}
+data_pays = merge(data_pays,import_poulet, on='Country')
+```
+#### Nettoyage de l'environnement
+```{r}
+#summary(data_pays)
+rm(import_poulet,temp)
+```
+###########################################################################################################################################################################################################################################################################
+## indice des prix a la consommation
+### Import des données
+```{r}
+indice_prix_conso <- read.csv("D:/IT/DATA/OC/DATA-PROJETS/PROJET-9/assets/data/indice_prix_consomation.csv",sep=",",header=TRUE, encoding='UTF-8') 
+
+```
+
+### Manipulation des données
+
+ On fait une première séléction de colonnes :
+
+Renommer les colonnes
+
+```{r}
+names(indice_prix_conso) <- c('c_domain','domain','c_FAO','Country','c_year','year','c_prod','Food_price_inflation','c_mois','mois','unite','value','symb','desc_symb','note')
+
+```
+On séléctionne
+```{r}
+indice_prix_conso <- indice_prix_conso[c('Country','c_FAO','Food_price_inflation','mois','unite','value')]
+```
+On cree une colonne food_price_inflation_unite
+
+```{r}
+indice_prix_conso['inflation_%'] <- paste(indice_prix_conso$Food_price_inflation, indice_prix_conso$unite)
+```
+
+On fait pivoter les données pour les avoir en colonne pour chaque pays
+```{r}
+indice_prix_conso <- indice_prix_conso %>% pivot_wider(names_from = mois,values_from = value)
+```
+
+Ce sont des % inflation renommer les colonnes pour data_pays
+Sélection des colonnes
+```{r}
+indice_prix_conso <- indice_prix_conso[c('Country',
+                                        'January',
+                                        'February',
+                                        'March',
+                                        'April',
+                                        'May',
+                                        'June',
+                                        'July',
+                                        'August',
+                                        'September',
+                                        'October',
+                                        'November',
+                                        'December'
+                                        )]
+```
+
+Calcule de la moyenne sur l'année
+```{r}
+indice_prix_conso['inflation_moy'] = rowMeans(indice_prix_conso[,c(2:13)])
+# 'January','March','April','May','June','July','August','September','October','November','December'
+               
+```
+
+Renommer le pays pour l'Angleterre
+```{r}
+indice_prix_conso[190,1] <- "United Kingdom"
+```
+
+
+### Ajout de  à data_pays 
+```{r}
+data_pays <- merge(data_pays,indice_prix_conso, on="Country")
+```
+#### Nettoyage de l'environnement
+```{r}
+rm(indice_prix_conso)
+# summary(data_pays)
+```
+
+## protein animal
+### Import des données
+```{r}
+protein_animal <- read.csv("D:/IT/DATA/OC/DATA-PROJETS/PROJET-9/assets/data/proteinAnimal_2016-2018.csv",sep=";",header=TRUE, encoding='UTF-8') 
+
+```
+
+### Manipulation des données
+
+Renommer les colonnes
+```{r}
+names(protein_animal) <- c('c_domain','domain','c_FAO','Country','c_element','element','c_item', 'item','c_year','year','unite','value','flag','lfag_desc','note')
+
+```
+
+On séléctionne
+```{r}
+protein_animal <- protein_animal[c('Country','item','unite','value')]
+```
+
+
+On fait pivoter les données pour les avoir en colonne pour chaque pays
+```{r}
+protein_animal <- protein_animal %>% pivot_wider(names_from = item,values_from = value)
+```
+
+Sélection des colonnes
+```{r}
+names(protein_animal) <- c('Country','unite','Apport_moyen_proteine(g/capita/day)','Apport_moyen_proteine_animal(g/capita/day)')
+```
+
+Sélection des colonnes
+```{r}
+protein_animal <- protein_animal[c('Country','Apport_moyen_proteine(g/capita/day)','Apport_moyen_proteine_animal(g/capita/day)')]
+```
+On renomme l'Angleterre
+```{r}
+protein_animal[163,1] <- "United Kingdom"
+```
+
+
+### Ajout de  à data_pays 
+```{r}
+data_pays = merge(data_pays,protein_animal, on='Country')
+```
+
+#### Nettoyage de l'environnement
+```{r}
+rm(protein_animal)
+# summary(data_pays)
+```
+
+
+# Calcule de nouveaux indicateurs et nettoyage
+
+## Enquête sur les importation à 0 et suppression des pays
+Enquête sur les pays dont l'importations est à 0
+```{r}
+pays_import_0 = data_pays[data_pays$Importation_MT== 0,c('Pays')]
+print(pays_import_0)
+```
+
+Certains sont liés à la crise aviaire de 2017 : on les garde 
+D'autre sont liés à une législation visant à développer le marché nationale : on supprime
+- Belize
+- Malawi
+- Sénégal
+
+
+```{r}
+# data_pays <-as.data.frame(data_pays)
+# Suppression des pays par leur index 
+data_pays <- data_pays[c(-14,-74,-104),]
+rm(pays_import_0)
+```
+
+## Evolution de la population
+```{r}
+# On calcule le taux de variation de population entre 2012 et 2017
+data_pays['pop_evol_12-17'] <- (data_pays['pop_2017'] - data_pays['pop_2012']) / data_pays['pop_2012'] * 100
+```
+
+## Calcul de la part des protéines provenant de la consommation de volaille par rapport à la quantité totale dans la disponibilité alimentaire total du pays
+
+```{r}
+temp = data_pays
+```
+
+```{r}
+data_pays['part_protein_Volaille/total'] <- round(( data_pays['Dispo_proteines_quantite(g/personne/jour)_Viande_Volailles'] / data_pays['Dispo_proteines_quantite(g/personne/jour)_Total_General'] *100),2)
+```
+
+## Volailles importées consommées par habitant = nourriture ?
+
+```{r}
+#import / nb_hab
+data_pays['volaille_import/nb_hab'] = data_pays['Importation_MT'] / data_pays['pop_2017'] 
+```
+
+## volailles produites nationalement consommées (par habitant)
+
+```{r}
+#production / nb_hab
+
+data_pays['volaille_prod/hab'] = data_pays['Production_MT'] / data_pays['pop_2017'] 
+```
+
+
+Importance de l'import de nourriture pour volaille
+```{r}
+# nourriture / import
+
+data_pays['volaille_nourriture/hab'] = data_pays['Nourriture_MT'] / data_pays['pop_2017'] 
+```
+
+
+```{r}
+rm(temp)
+```
+
+# Séléction colonnes finales
+```{r}
+data_pays <- data_pays[,c(-2,-3,-4,-5)]
+# sum(is.na(data_pays))
+```
+Renommer les colonnes pour éviter les erreurs à l'export
+```{r}
+names(data_pays) = c('Country',
+               'Production_MT',
+               'Importation_MT',
+               'Disponibilite_interieure_MT',
+               'Nourriture_MT',
+               'distance_France',
+               'PIB_US_$_M',
+               'Political_stability',
+               'pop_2012',
+               'pop_2017',
+               'Ease_of_doing_business_score',
+               'Score_Starting _a_business',
+               'Dispo_alim(Kcal/personne/jour)_Total_General',
+               'Dispo_proteines_quantite(g/personne/jour)_Total_General',
+               'Dispo_alim_quantite(kg/personne/an)_Viande_Volailles',
+               'Disp_alim(Kcal/personne/jour)_Viande_Volailles',
+               'Dispo_proteines_quantite(g/personne/jour)_Viande_Volailles',
+               'Importation_nb_tete',
+               'Importation-tonnes',
+               'Importation_Poulet_$USD',
+               'January', 
+               'February',
+               'March',
+               'April',
+               'May',
+               'June',
+               'July',
+               'August',
+               'September',
+               'October',
+               'November',
+               'December',
+               'inflation_moy',# indicateur calculé
+               'Apport_moyen_proteine(g/capita/day)',
+               'Apport_moyen_proteine_animal(g/capita/day)',
+               # Indicateurs calculés
+               'pop_evol_12-17',
+               'part_protein_Volaille/total',
+               'volaille_import/nb_hab',
+               'volaille_prod/hab',
+               'volaille_nourriture/hab'
+               
+)
+```
+
+Sélectionner les colonnes du df final
+
+```{r}
+# PESTEL : Politique, Economique, Social, Technologie, Environnement, Réglementaire
+
+data_pays <- data_pays[c('Country',
+          # Politique
+                         'Production_MT',
+                         'Importation_MT',
+                         # 'Importation_nb_tete',
+                         # 'Importation-tonnes',
+                         # 'Importation_Poulet_$USD',
+                         # 'Disponibilite_interieure_MT',
+                         # 'Nourriture_MT',
+                         
+          # Economique  
+                         'PIB_US_$_M',
+                         'Political_stability',
+                         'inflation_moy',
+          
+          # Social et consommation     
+    
+                         # 'pop_2012',
+                         'pop_2017',
+                         # 'pop_evol_12-17',
+                         # 'Dispo_alim(Kcal/personne/jour)_Total_General',
+                         # 'Dispo_proteines_quantite(g/personne/jour)_Total_General',
+                         # 'Dispo_alim_quantite(kg/personne/an)_Viande_Volailles',
+                         # 'Disp_alim(Kcal/personne/jour)_Viande_Volailles',
+                         # 'Dispo_proteines_quantite(g/personne/jour)_Viande_Volailles',
+                         'part_protein_Volaille/total',
+                         # 'volaille_import/nb_hab',
+                         # 'volaille_prod/hab',
+                         # 'volaille_nourriture/hab',
+                         # 'Apport_moyen_proteine(g/capita/day)',
+                         # 'Apport_moyen_proteine_animal(g/capita/day)',
+          
+          # Technologie et transport
+                         'distance_France',
+                         'Ease_of_doing_business_score'
+                         # 'Score_Starting _a_business',
+                         
+          # Réglementaire : les pays concernés ont été supprimés du data frame
+          
+         )]
+```
+
+
+# Export
+```{r}
+write.table(data_pays,"../assets/data/data_pays_5.csv",sep=",",row.names=FALSE,quote=FALSE)
+```
+
+```{r echo=FALSE}
+# TEST de sortie
+sortie <- read.csv("D:/IT/DATA/OC/DATA-PROJETS/PROJET-9/assets/data/data_pays_5.csv",sep=",",header=TRUE, encoding='UTF-8') 
+
+```
+
+ 
+```{r} 
+
+```
+
